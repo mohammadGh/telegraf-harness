@@ -4,19 +4,18 @@ import (
 	"fmt"
 	"net/http"
 
+	"bytes"
 	"encoding/json"
 	"github.com/gorilla/mux"
-	"influxdb-line-protocol-to-json"
+	influxjson "github.com/mohammadGh/influxdb-line-protocol-to-json"
+	"io"
 	"log"
 	"os/exec"
 	"strings"
 )
 
-var metrics = [1]string{"win_cpu"}
-
-type Agent struct {
-	db string
-}
+var influxCmd *exec.Cmd
+var influxCmdIsRunning bool
 
 func main() {
 	r := mux.NewRouter()
@@ -28,8 +27,35 @@ func main() {
 		fmt.Fprintf(w, "You've requested the book: %s on page %s\n", title, page)
 	})
 
-	r.HandleFunc("/test", func(w http.ResponseWriter, r *http.Request) {
+	r.HandleFunc("/config", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Printf("/config called")
 
+		var Buf bytes.Buffer
+		// in your case file would be fileupload
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			panic(err)
+		}
+		defer file.Close()
+		name := strings.Split(header.Filename, ".")
+		fmt.Printf("File name %s\n", name[0])
+		// Copy the file data to my buffer
+		io.Copy(&Buf, file)
+		// do something with the contents...
+		// I normally have a struct defined and unmarshal into a struct, but this will
+		// work as an example
+		contents := Buf.String()
+		fmt.Println(contents)
+		// I reset the buffer in case I want to use it again
+		// reduces memory allocations in more intense projects
+		Buf.Reset()
+		// do something else
+		// etc write header
+		return
+
+	})
+
+	r.HandleFunc("/test", func(w http.ResponseWriter, r *http.Request) {
 		writeInfluxConfigFile("", "lib\\config.conf")
 		var telegrafArg = "-test -config lib\\config.conf"
 		out, err := exec.Command("lib\\t.exe", strings.Split(telegrafArg, " ")...).Output()
@@ -39,11 +65,44 @@ func main() {
 		//fmt.Printf("The date is %s\n", out)
 		outstr := fmt.Sprintf("%s", out)
 		outstr = strings.Replace(outstr, "> ", "", -1)
-		jsonStr := influxdb_line_protocol_to_json.LinesToJson(outstr)
+		jsonStr := influxjson.LinesToJson(outstr)
 		//w.Write([]byte(outstr + "\n\n" + jsonStr))
 		respondWithJSONStr(w, 200, jsonStr)
 		//to json
 	})
+
+	r.HandleFunc("/start", func(w http.ResponseWriter, r *http.Request) {
+		if influxCmdIsRunning == true {
+			respondWithJSON(w, 200, map[string]string{"status": "already started"})
+			return
+		}
+		writeInfluxConfigFile("", "lib\\config.conf")
+		var telegrafArg = "-config lib\\config.conf"
+		influxCmd = exec.Command("lib\\t.exe", strings.Split(telegrafArg, " ")...)
+		err := influxCmd.Start()
+		if err != nil {
+			log.Fatal(err)
+		}
+		influxCmdIsRunning = true
+		respondWithJSON(w, 200, map[string]string{"status": "started"})
+		//to json
+	})
+
+	r.HandleFunc("/stop", func(w http.ResponseWriter, r *http.Request) {
+		if influxCmd == nil {
+			respondWithJSON(w, 200, map[string]string{"status": "already stopped"})
+			return
+		}
+		err := influxCmd.Process.Kill()
+		if err != nil {
+			log.Fatal(err)
+		}
+		influxCmd = nil
+		influxCmdIsRunning = false
+		respondWithJSON(w, 200, map[string]string{"status": "stopped"})
+		//to json
+	})
+
 	http.ListenAndServe(":8080", r)
 }
 

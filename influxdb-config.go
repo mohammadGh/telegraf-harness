@@ -4,12 +4,16 @@ import "io/ioutil"
 
 func writeInfluxConfigFile(txt string, path string) {
 	var sampleConfig = `
-	[[inputs.win_perf_counters.object]]
-		ObjectName = "Processor"
-		Instances = ["*"]
-		Counters = ["% Idle Time"]
-		Measurement = "cpu"
-		IncludeTotal=true
+[[outputs.influxdb]]
+	urls = ["http://127.0.0.1:8086"] 
+	database = "telegraf"
+
+[[inputs.win_perf_counters.object]]
+	ObjectName = "Processor"
+	Instances = ["*"]
+	Counters = ["% Idle Time"]
+	Measurement = "cpu"
+	IncludeTotal=true
 	`
 	bytes := []byte(sampleConfig)
 	// write the whole body at once
