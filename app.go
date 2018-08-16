@@ -10,6 +10,7 @@ import (
 	influxjson "github.com/mohammadGh/influxdb-line-protocol-to-json"
 	"io"
 	"log"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -19,17 +20,35 @@ var influxCmdIsRunning bool
 
 func main() {
 	r := mux.NewRouter()
-	r.HandleFunc("/books/{title}/page/{page}", func(w http.ResponseWriter, r *http.Request) {
-		vars := mux.Vars(r)
-		title := vars["title"]
-		page := vars["page"]
-
-		fmt.Fprintf(w, "You've requested the book: %s on page %s\n", title, page)
+	r.HandleFunc("/ddd", func(w http.ResponseWriter, r *http.Request) {
+		r.ParseMultipartForm(32 << 20)
+		var jsonMap map[string]interface{}
+		jsonMap = make(map[string]interface{})
+		for key, value := range r.Form {
+			jsonMap[key] = value
+		}
+		_, header, _ := r.FormFile("file")
+		jsonMap["filename"] = header.Filename
+		respondWithJSON(w, 200, jsonMap)
+	})
+	r.HandleFunc("/ccc", func(w http.ResponseWriter, r *http.Request) {
+		r.ParseMultipartForm(1024 * 100)
+		var jsonMap map[string]interface{}
+		jsonMap = make(map[string]interface{})
+		jsonMap["agent.interval"] = r.FormValue("agent.interval")
+		jsonMap["agent.hostname"] = r.FormValue("agent.hostname")
+		jsonMap["outputs.influxdb.urls"] = r.FormValue("outputs.influxdb.urls")
+		jsonMap["outputs.influxdb.database"] = r.FormValue("outputs.influxdb.database")
+		jsonMap["interval"] = r.FormValue("outputs.influxdb.precision") //default=s
+		_, header, _ := r.FormFile("file")
+		jsonMap["filename"] = header.Filename
+		respondWithJSON(w, 200, jsonMap)
 	})
 
 	r.HandleFunc("/config", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("/config called")
-
+		vars := mux.Vars(r)
+		println(vars["interval"])
 		var Buf bytes.Buffer
 		// in your case file would be fileupload
 		file, header, err := r.FormFile("file")
@@ -56,9 +75,15 @@ func main() {
 	})
 
 	r.HandleFunc("/test", func(w http.ResponseWriter, r *http.Request) {
-		writeInfluxConfigFile("", "lib\\config.conf")
-		var telegrafArg = "-test -config lib\\config.conf"
-		out, err := exec.Command("lib\\t.exe", strings.Split(telegrafArg, " ")...).Output()
+		currentDir, err := os.Getwd()
+		if err != nil {
+			log.Fatal(err)
+		}
+		writeInfluxConfigFile("", "lib/config.conf")
+		var telegrafArg = "-test -config config.conf"
+		cmd := exec.Command(".\\t.exe", strings.Split(telegrafArg, " ")...)
+		cmd.Dir = currentDir + string(os.PathSeparator) + "lib"
+		out, err := cmd.Output()
 		if err != nil {
 			log.Fatal(err)
 		}
