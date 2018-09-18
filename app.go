@@ -10,8 +10,8 @@ import (
 	influxjson "github.com/mohammadGh/influxdb-line-protocol-to-json"
 	"io"
 	"log"
-	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -20,7 +20,7 @@ var influxCmdIsRunning bool
 
 func main() {
 	r := mux.NewRouter()
-	r.HandleFunc("/ddd", func(w http.ResponseWriter, r *http.Request) {
+	r.HandleFunc("/test-form", func(w http.ResponseWriter, r *http.Request) {
 		r.ParseMultipartForm(32 << 20)
 		var jsonMap map[string]interface{}
 		jsonMap = make(map[string]interface{})
@@ -28,8 +28,49 @@ func main() {
 			jsonMap[key] = value
 		}
 		_, header, _ := r.FormFile("file")
-		jsonMap["filename"] = header.Filename
+		if header != nil {
+			jsonMap["filename"] = header.Filename
+		}
 		respondWithJSON(w, 200, jsonMap)
+	})
+	r.HandleFunc("/ddd", func(w http.ResponseWriter, r *http.Request) {
+		//w.Write([]byte ( r.FormValue("isna")))
+		r.ParseMultipartForm(32 << 20)
+		//r.ParseMultipartForm(32 << 20)
+		var jsonMap map[string]interface{}
+		jsonMap = make(map[string]interface{})
+		for key, value := range r.Form {
+			if len(value) > 0 {
+				//decode as int
+				intVal, err := strconv.Atoi(value[0])
+				if err == nil {
+					jsonMap[key] = intVal
+					continue
+				}
+
+				//decode as float
+				floatVal, err := strconv.ParseFloat(value[0], 64)
+				if err == nil {
+					jsonMap[key] = floatVal
+					continue
+				}
+
+				//decode as array
+				arrayVal, err := decodeArray(value[0])
+				if err == nil {
+					jsonMap[key] = arrayVal
+					continue
+				}
+				//decode as string
+				jsonMap[key] = value[0]
+			}
+		}
+		str := MapToTomlString(jsonMap)
+		w.Write([]byte(str))
+		/*
+			_, header, _ := r.FormFile("file")
+			jsonMap["filename"] = header.Filename
+			respondWithJSON(w, 200, jsonMap)*/
 	})
 	r.HandleFunc("/ccc", func(w http.ResponseWriter, r *http.Request) {
 		r.ParseMultipartForm(1024 * 100)
@@ -75,42 +116,47 @@ func main() {
 	})
 
 	r.HandleFunc("/test", func(w http.ResponseWriter, r *http.Request) {
-		currentDir, err := os.Getwd()
-		if err != nil {
-			log.Fatal(err)
+		params := r.URL.Query()
+		if len(params) == 0 {
+			params = r.Form
 		}
-		writeInfluxConfigFile("", "lib/config.conf")
-		var telegrafArg = "-test -config config.conf"
-		cmd := exec.Command(".\\t.exe", strings.Split(telegrafArg, " ")...)
-		cmd.Dir = currentDir + string(os.PathSeparator) + "lib"
+		formAsKeyMaps := httpFormToKeyMap(params)
+
+		writeInfluxConfigFile(formAsKeyMaps, "lib/config-template.conf", "lib/config.conf")
+		var telegrafArg = "-test -config lib/config.conf"
+		cmd := exec.Command("lib/t.exe", strings.Split(telegrafArg, " ")...)
 		out, err := cmd.Output()
 		if err != nil {
 			log.Fatal(err)
 		}
-		//fmt.Printf("The date is %s\n", out)
+
 		outstr := fmt.Sprintf("%s", out)
 		outstr = strings.Replace(outstr, "> ", "", -1)
 		jsonStr := influxjson.LinesToJson(outstr)
-		//w.Write([]byte(outstr + "\n\n" + jsonStr))
+
 		respondWithJSONStr(w, 200, jsonStr)
-		//to json
 	})
 
 	r.HandleFunc("/start", func(w http.ResponseWriter, r *http.Request) {
+
 		if influxCmdIsRunning == true {
 			respondWithJSON(w, 200, map[string]string{"status": "already started"})
 			return
 		}
-		writeInfluxConfigFile("", "lib\\config.conf")
-		var telegrafArg = "-config lib\\config.conf"
-		influxCmd = exec.Command("lib\\t.exe", strings.Split(telegrafArg, " ")...)
+		params := r.URL.Query()
+		if len(params) == 0 {
+			params = r.Form
+		}
+		formAsKeyMaps := httpFormToKeyMap(params)
+		writeInfluxConfigFile(formAsKeyMaps, "lib/config-template.conf", "lib/config.conf")
+		var telegrafArg = "-config lib/config.conf"
+		influxCmd = exec.Command("lib/t.exe", strings.Split(telegrafArg, " ")...)
 		err := influxCmd.Start()
 		if err != nil {
 			log.Fatal(err)
 		}
 		influxCmdIsRunning = true
 		respondWithJSON(w, 200, map[string]string{"status": "started"})
-		//to json
 	})
 
 	r.HandleFunc("/stop", func(w http.ResponseWriter, r *http.Request) {
@@ -128,12 +174,31 @@ func main() {
 		//to json
 	})
 
+	r.HandleFunc("/Config", func(w http.ResponseWriter, r *http.Request) {
+
+		if influxCmdIsRunning == true {
+			respondWithJSON(w, 200, map[string]string{"status": "already started"})
+			return
+		}
+		formAsKeyMaps := httpFormToKeyMap(r.Form)
+		writeInfluxConfigFile(formAsKeyMaps, "lib/config-template.conf", "lib/config.conf")
+		var telegrafArg = "-config lib/config.conf"
+		influxCmd = exec.Command("lib/t.exe", strings.Split(telegrafArg, " ")...)
+		err := influxCmd.Start()
+		if err != nil {
+			log.Fatal(err)
+		}
+		influxCmdIsRunning = true
+		respondWithJSON(w, 200, map[string]string{"status": "started"})
+		//to json
+	})
+
 	http.ListenAndServe(":8080", r)
 }
 
-func respondWithError(w http.ResponseWriter, code int, message string) {
+/*func respondWithError(w http.ResponseWriter, code int, message string) {
 	respondWithJSON(w, code, map[string]string{"error": message})
-}
+}*/
 
 func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 	response, _ := json.Marshal(payload)
@@ -146,4 +211,15 @@ func respondWithJSONStr(w http.ResponseWriter, code int, payload string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	w.Write([]byte(payload))
+}
+
+func httpFormToKeyMap(form map[string][]string) map[string]string {
+	var result map[string]string
+	result = make(map[string]string)
+	for key, value := range form {
+		if len(value) > 0 {
+			result[key] = value[0]
+		}
+	}
+	return result
 }
