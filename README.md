@@ -1,4 +1,4 @@
-# Telegraf Rest Harness
+# Telegraf HTTP Harness
 A HTTP based harness for [Telegraf](https://github.com/influxdata/telegraf) monitoring system. it has an embedded executable version of Telegraf. Now you can simply start and stop your Telegraf remotely and gathering your system metrics and send them to your Influxdb instant.
 ## Usage
 In windows, download the  [latest binary package from release section](https://github.com/mohammadGh/telegraf-harness/releases/download/v0.2/telegraph-harness-v0_2.zip) (or clone the project and build it with `go build` ), unzip it and then run the executable `telegraf-harness.exe`
