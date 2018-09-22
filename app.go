@@ -105,7 +105,7 @@ func main() {
 
 	//start emmbed http server on port 6663
 	//TODO: mgh, 2017: the port number must read from configuarion file
-	Info.Println("Telegraf Http Harness Version 0.1 Started")
+	Info.Println("Telegraf Http Harness Version 0.2 Started")
 	Info.Println("Listen on port 6663 for incoming http commands")
 	err := http.ListenAndServe(":6663", r)
 	log.Fatal(err)
