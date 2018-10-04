@@ -7,14 +7,17 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/gorilla/mux"
 	influxjson "github.com/mohammadGh/influxdb-line-protocol-to-json"
+	"github.com/tevino/abool"
 )
 
 var influxCmd *exec.Cmd
-var influxCmdIsRunning bool
+var influxRunningMutexFlag *abool.AtomicBool = abool.New()
+var javaProcess string = ""
 var Info *log.Logger
 
 func main() {
@@ -41,52 +44,75 @@ func main() {
 
 		outstr := fmt.Sprintf("%s", out)
 		outstr = strings.Replace(outstr, "> ", "", -1)
+
 		jsonStr := influxjson.LinesToJson(outstr)
 
 		// info telegraf test output
-		Info.Println("TEST Command Result => \n " + outstr)
+		outputLines := strings.Split(outstr, "\n")
+		numLines := strconv.Itoa(len(outputLines))
+		Info.Println("Telegraf test command extracted " + numLines + " metrics")
+
 		respondWithJSONStr(w, 200, jsonStr)
 	})
 
 	r.HandleFunc("/start", func(w http.ResponseWriter, r *http.Request) {
+		var result map[string]string = make(map[string]string)
+		if influxRunningMutexFlag.SetToIf(false, true) {
 
-		if influxCmdIsRunning == true {
-			Info.Println("Telegraf is already Started")
-			respondWithJSON(w, 200, map[string]string{"status": "already started"})
+			params := r.URL.Query()
+			if len(params) == 0 {
+				params = r.Form
+			}
+			formAsKeyMaps := httpFormToKeyMap(params)
+
+			//start jolokia
+			if value, ok := formAsKeyMaps["java"]; ok {
+				javaProcess = value
+				_, err := StartJolokia("lib/jolokia-jvm-1.6.0-agent.jar", "start", javaProcess)
+				if err != nil {
+					result["extra_agents"] = "Java(Jolokia) on process " + javaProcess
+					Info.Println("Jolokia agent started on java process " + javaProcess)
+				} else {
+					Info.Println("Error in starting Jolokia agent on java process " + javaProcess)
+				}
+			}
+
+			writeInfluxConfigFile(formAsKeyMaps, "lib/config-template.conf", "lib/config.conf")
+			var telegrafArg = "-config lib/config.conf"
+			influxCmd = exec.Command("lib/t.exe", strings.Split(telegrafArg, " ")...)
+			err := influxCmd.Start()
+			if err != nil {
+				log.Fatal(err)
+			}
+			Info.Println("Telegraf is Started")
+			result["status"] = "started"
+			respondWithJSON(w, 200, result)
 			return
 		}
-		params := r.URL.Query()
-		if len(params) == 0 {
-			params = r.Form
-		}
-		formAsKeyMaps := httpFormToKeyMap(params)
-		writeInfluxConfigFile(formAsKeyMaps, "lib/config-template.conf", "lib/config.conf")
-		var telegrafArg = "-config lib/config.conf"
-		influxCmd = exec.Command("lib/t.exe", strings.Split(telegrafArg, " ")...)
-		err := influxCmd.Start()
-		if err != nil {
-			log.Fatal(err)
-		}
-		influxCmdIsRunning = true
-		Info.Println("Telegraf is Started")
-		respondWithJSON(w, 200, map[string]string{"status": "started"})
+		Info.Println("Telegraf is already Started")
+		respondWithJSON(w, 200, map[string]string{"status": "already started"})
 	})
 
 	r.HandleFunc("/stop", func(w http.ResponseWriter, r *http.Request) {
-		if influxCmd == nil {
-			Info.Println("Telegraf is already Stopped")
-			respondWithJSON(w, 200, map[string]string{"status": "already stopped"})
+		if influxRunningMutexFlag.SetToIf(true, false) {
+			//Stop jolokia
+			if javaProcess != "" {
+				StartJolokia("lib/jolokia-jvm-1.6.0-agent.jar", "stop", javaProcess)
+			}
+
+			err := influxCmd.Process.Kill()
+			if err != nil {
+				log.Fatal(err)
+			}
+			influxCmd = nil
+			javaProcess = ""
+			Info.Println("Telegraf is Stopped")
+			respondWithJSON(w, 200, map[string]string{"status": "stopped"})
 			return
 		}
-		err := influxCmd.Process.Kill()
-		if err != nil {
-			log.Fatal(err)
-		}
-		influxCmd = nil
-		influxCmdIsRunning = false
-		Info.Println("Telegraf is Stopped")
-		respondWithJSON(w, 200, map[string]string{"status": "stopped"})
-		//to json
+
+		Info.Println("Telegraf is already Stopped")
+		respondWithJSON(w, 200, map[string]string{"status": "already stopped"})
 	})
 
 	r.HandleFunc("/config", func(w http.ResponseWriter, r *http.Request) {
@@ -105,7 +131,7 @@ func main() {
 
 	//start emmbed http server on port 6663
 	//TODO: mgh, 2017: the port number must read from configuarion file
-	Info.Println("Telegraf Http Harness Version 0.2 Started")
+	Info.Println("Telegraf Http Harness Version 0.3 Started")
 	Info.Println("Listen on port 6663 for incoming http commands")
 	err := http.ListenAndServe(":6663", r)
 	log.Fatal(err)
